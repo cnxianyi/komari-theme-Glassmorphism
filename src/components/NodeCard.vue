@@ -11,7 +11,7 @@ import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { formatCurrencyValue, formatPriceWithCycle, getDaysOnline, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
+import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [] }>()
@@ -104,7 +104,7 @@ const onlineInfoTags = computed(() => {
   if (node.price === 0)
     return []
   const lang = appStore.lang
-  const days = getDaysOnline(node.created_at)
+  const days = Math.floor((node.uptime ?? 0) / 86400)
   const tags = [lang === 'zh-CN' ? `在线 ${days} 天` : `${days} days online`]
   if (showPrice.value)
     tags.push(formatPriceWithCycle(node.price, node.billing_cycle, node.currency, lang))
