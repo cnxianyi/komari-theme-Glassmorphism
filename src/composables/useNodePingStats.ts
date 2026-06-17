@@ -12,7 +12,10 @@ export interface NodePingHistoryPoint {
 export interface NodePingStatsState {
   avgLatency: number
   maxLatency: number
+  maxLatencyTaskName: string
   avgLoss: number
+  maxLoss: number
+  maxLossTaskName: string
   avgVolatility: number
   history: NodePingHistoryPoint[]
   hasData: boolean
@@ -25,12 +28,19 @@ interface PingRecord {
   value: number
 }
 
+interface PingTaskInfo {
+  id: number
+  name: string
+}
+
 interface SharedPingRecordsResponse {
   records?: PingRecord[]
+  tasks?: PingTaskInfo[]
 }
 
 interface SharedPingRecordsState {
   recordsByClient: Map<string, PingRecord[]>
+  taskNames: Map<number, string>
 }
 
 interface SharedPingRecordsEntry {
@@ -44,7 +54,7 @@ interface SharedPingRecordsEntry {
 }
 
 const HISTORY_BUCKET_COUNT = 20
-const CACHE_VERSION = 6
+const CACHE_VERSION = 8
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
@@ -59,7 +69,10 @@ function createEmptyStats(): NodePingStatsState {
   return {
     avgLatency: 0,
     maxLatency: 0,
+    maxLatencyTaskName: '',
     avgLoss: 0,
+    maxLoss: 0,
+    maxLossTaskName: '',
     avgVolatility: 0,
     history: [],
     hasData: false,
@@ -101,6 +114,21 @@ function getIncludedTaskIds(records: PingRecord[]): Set<number> {
   )
 }
 
+function buildTaskNameMap(tasks: PingTaskInfo[]): Map<number, string> {
+  const map = new Map<number, string>()
+  for (const task of tasks) {
+    if (typeof task.id === 'number' && typeof task.name === 'string' && task.name.trim())
+      map.set(task.id, task.name.trim())
+  }
+  return map
+}
+
+function resolveTaskName(taskId: number | null, taskNames: Map<number, string>): string {
+  if (taskId === null)
+    return ''
+  return taskNames.get(taskId) ?? ''
+}
+
 function getCacheKey(uuid: string, hours: number): string {
   return `${CACHE_KEY_PREFIX}:${uuid}:${hours}`
 }
@@ -125,7 +153,10 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
   const state = value as Record<string, unknown>
   return typeof state.avgLatency === 'number'
     && typeof state.maxLatency === 'number'
+    && typeof state.maxLatencyTaskName === 'string'
     && typeof state.avgLoss === 'number'
+    && typeof state.maxLoss === 'number'
+    && typeof state.maxLossTaskName === 'string'
     && typeof state.avgVolatility === 'number'
     && typeof state.hasData === 'boolean'
     && Array.isArray(state.history)
@@ -230,6 +261,7 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
 
       entry.data.value = {
         recordsByClient: buildRecordsByClient(result?.records ?? []),
+        taskNames: buildTaskNameMap(result?.tasks ?? []),
       }
       entry.lastFetchedAt = Date.now()
     }
@@ -339,7 +371,7 @@ function getPercentile(values: number[], percentile: number): number | null {
   return lowerValue + (upperValue - lowerValue) * (position - lowerIndex)
 }
 
-function buildStats(records: PingRecord[]): NodePingStatsState {
+function buildStats(records: PingRecord[], taskNames: Map<number, string>): NodePingStatsState {
   const includedTaskIds = getIncludedTaskIds(records)
 
   if (!includedTaskIds.size)
@@ -358,17 +390,34 @@ function buildStats(records: PingRecord[]): NodePingStatsState {
   const latencyValues: number[] = []
   const taskLossValues: number[] = []
   const volatilityValues: number[] = []
+  let maxLatencyTaskId: number | null = null
+  let maxLossTaskId: number | null = null
+  let peakLatency = -1
+  let peakLoss = -1
 
-  for (const recordsByTask of taskRecords.values()) {
+  for (const [taskId, recordsByTask] of taskRecords.entries()) {
     const validValues = recordsByTask
       .map(record => record.value)
       .filter(value => value >= 0)
 
-    if (!validValues.length)
-      continue
+    const taskMaxLatency = validValues.length ? Math.max(...validValues) : null
+    const lossRate = recordsByTask.length
+      ? (recordsByTask.length - validValues.length) / recordsByTask.length * 100
+      : 0
 
-    latencyValues.push(average(validValues))
-    taskLossValues.push((recordsByTask.length - validValues.length) / recordsByTask.length * 100)
+    if (taskMaxLatency !== null) {
+      latencyValues.push(average(validValues))
+      if (taskMaxLatency >= peakLatency) {
+        peakLatency = taskMaxLatency
+        maxLatencyTaskId = taskId
+      }
+    }
+
+    taskLossValues.push(lossRate)
+    if (lossRate >= peakLoss) {
+      peakLoss = lossRate
+      maxLossTaskId = taskId
+    }
 
     if (validValues.length > 1) {
       const p50 = getPercentile(validValues, 0.5)
@@ -379,10 +428,6 @@ function buildStats(records: PingRecord[]): NodePingStatsState {
     }
   }
 
-  const allValidLatencies = filteredRecords
-    .filter(record => record.value >= 0)
-    .map(record => record.value)
-
   const historyLatencyValues = history
     .map(point => point.latency)
     .filter(isFiniteNumber)
@@ -391,19 +436,27 @@ function buildStats(records: PingRecord[]): NodePingStatsState {
     .filter(isFiniteNumber)
 
   const avgLatency = latencyValues.length ? average(latencyValues) : average(historyLatencyValues)
-  const maxLatency = allValidLatencies.length
-    ? Math.max(...allValidLatencies)
+  const maxLatency = peakLatency >= 0
+    ? peakLatency
     : historyLatencyValues.length
       ? Math.max(...historyLatencyValues)
       : 0
   const avgLoss = taskLossValues.length ? average(taskLossValues) : average(historyLossValues)
+  const maxLoss = peakLoss >= 0
+    ? peakLoss
+    : historyLossValues.length
+      ? Math.max(...historyLossValues)
+      : 0
   const avgVolatility = average(volatilityValues)
   const hasData = history.length > 0 || latencyValues.length > 0 || taskLossValues.length > 0
 
   return {
     avgLatency,
     maxLatency,
+    maxLatencyTaskName: resolveTaskName(maxLatencyTaskId, taskNames),
     avgLoss,
+    maxLoss,
+    maxLossTaskName: resolveTaskName(maxLossTaskId, taskNames),
     avgVolatility,
     history,
     hasData,
@@ -462,7 +515,7 @@ export function useNodePingStats(
       return readStatsCache(nodeUuid, hours) ?? createEmptyStats()
 
     const records = state.recordsByClient.get(nodeUuid) ?? []
-    return records.length ? buildStats(records) : createEmptyStats()
+    return records.length ? buildStats(records, state.taskNames) : createEmptyStats()
   })
 
   // 副作用：按需触发首次共享加载并维护 loading/error，不再命令式写入 stats。
@@ -537,7 +590,10 @@ export function useNodePingStats(
     history: computed(() => stats.value.history),
     avgLatency: computed(() => stats.value.avgLatency),
     maxLatency: computed(() => stats.value.maxLatency),
+    maxLatencyTaskName: computed(() => stats.value.maxLatencyTaskName),
     avgLoss: computed(() => stats.value.avgLoss),
+    maxLoss: computed(() => stats.value.maxLoss),
+    maxLossTaskName: computed(() => stats.value.maxLossTaskName),
     avgVolatility: computed(() => stats.value.avgVolatility),
     hasData: computed(() => stats.value.hasData),
   }

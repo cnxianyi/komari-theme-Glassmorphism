@@ -126,11 +126,15 @@ export function useNodePingDisplay(
 
   const lossDisplay = computed(() => {
     if (pingStats.hasData.value)
-      return `${pingStats.avgLoss.value.toFixed(1)}%`
+      return `${pingStats.maxLoss.value.toFixed(1)}%`
     if (pingStats.loading.value)
       return options.loadingDisplayText ?? '加载中'
     return options.emptyDisplayText ?? '-'
   })
+
+  const latencyLabel = computed(() => pingStats.maxLatencyTaskName.value || '-')
+
+  const lossLabel = computed(() => pingStats.maxLossTaskName.value || '-')
 
   const latencyPanelTooltip = computed(() => {
     if (!pingStats.hasData.value) {
@@ -138,7 +142,10 @@ export function useNodePingDisplay(
         return options.loadingPanelTooltipText?.latency ?? ''
       return options.emptyPanelTooltipText?.latency ?? ''
     }
-    return `最高延迟 ${Math.round(pingStats.maxLatency.value)} ms`
+    const prefix = pingStats.maxLatencyTaskName.value
+      ? `${pingStats.maxLatencyTaskName.value}最高延迟`
+      : '最高延迟'
+    return `${prefix} ${Math.round(pingStats.maxLatency.value)} ms`
   })
 
   const lossPanelTooltip = computed(() => {
@@ -151,7 +158,10 @@ export function useNodePingDisplay(
     const volatility = pingStats.avgVolatility.value > 0
       ? `，平均波动 ${pingStats.avgVolatility.value.toFixed(2)}`
       : ''
-    return `平均丢包 ${pingStats.avgLoss.value.toFixed(1)}%${volatility}`
+    const prefix = pingStats.maxLossTaskName.value
+      ? `${pingStats.maxLossTaskName.value}最高丢包`
+      : '最高丢包'
+    return `${prefix} ${pingStats.maxLoss.value.toFixed(1)}%${volatility}`
   })
 
   return {
@@ -162,6 +172,8 @@ export function useNodePingDisplay(
     lossRenderBars,
     latencyDisplay,
     lossDisplay,
+    latencyLabel,
+    lossLabel,
     latencyPanelTooltip,
     lossPanelTooltip,
   }

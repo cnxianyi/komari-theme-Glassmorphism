@@ -33,6 +33,8 @@ const {
   lossRenderBars,
   latencyDisplay,
   lossDisplay,
+  latencyLabel,
+  lossLabel,
   latencyPanelTooltip,
   lossPanelTooltip,
 } = useNodePingDisplay(() => props.node.uuid)
@@ -280,7 +282,7 @@ function hasRegion(region: string | null | undefined): boolean {
             :title="latencyPanelTooltip"
           >
             <div class="flex items-center justify-between text-[11px] leading-none">
-              <span class="text-muted-foreground">延迟</span>
+              <span class="text-muted-foreground truncate min-w-0">{{ latencyLabel }}</span>
               <span class="font-medium">{{ latencyDisplay }}</span>
             </div>
             <div
@@ -305,7 +307,7 @@ function hasRegion(region: string | null | undefined): boolean {
             :title="lossPanelTooltip"
           >
             <div class="flex items-center justify-between text-[11px] leading-none">
-              <span class="text-muted-foreground">丢包</span>
+              <span class="text-muted-foreground truncate min-w-0">{{ lossLabel }}</span>
               <span class="font-medium">{{ lossDisplay }}</span>
             </div>
             <div
