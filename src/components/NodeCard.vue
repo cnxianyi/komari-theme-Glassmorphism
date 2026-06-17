@@ -11,7 +11,7 @@ import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
+import { formatCurrencyValue, getBillingCycleText, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [] }>()
@@ -98,42 +98,36 @@ const trafficPercentageClass = computed(() => {
 // 但在线天数、剩余天数等非金额信息仍然展示
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 
-// 左上角：在线天数（始终） + 价格（仅在允许显示金额时）
+// 顶部标签：$112/年 · 在线7天 · 剩300天/$112
 const onlineInfoTags = computed(() => {
   const node = props.node
-  if (node.price === 0)
-    return []
   const lang = appStore.lang
   const days = Math.floor((node.uptime ?? 0) / 86400)
-  const tags = [lang === 'zh-CN' ? `在线 ${days} 天` : `${days} days online`]
-  if (showPrice.value)
-    tags.push(formatPriceWithCycle(node.price, node.billing_cycle, node.currency, lang))
-  return tags
-})
+  const onlineText = lang === 'zh-CN' ? `在线${days}天` : `${days}d online`
 
-// 第三列：剩余天数（始终） + 剩余价值（仅在允许显示金额时），带图标与相邻列对齐
-const remainingInfoTags = computed<Array<{ icon: string, text: string }>>(() => {
-  const node = props.node
-  if (node.price === 0)
-    return []
-  const lang = appStore.lang
-  const days = getDaysUntilExpired(node.expired_at)
-  const status = getExpireStatus(node.expired_at)
-  let daysText: string
-  if (status === 'expired')
-    daysText = lang === 'zh-CN' ? '已过期' : 'Expired'
-  else if (status === 'long_term')
-    daysText = lang === 'zh-CN' ? '长期' : 'Long-term'
+  const expireDays = getDaysUntilExpired(node.expired_at)
+  const expireStatus = getExpireStatus(node.expired_at)
+  let remainDaysText: string
+  if (expireStatus === 'expired')
+    remainDaysText = lang === 'zh-CN' ? '已过期' : 'Expired'
+  else if (expireStatus === 'long_term')
+    remainDaysText = lang === 'zh-CN' ? '长期' : 'Long-term'
   else
-    daysText = lang === 'zh-CN' ? `剩余 ${days} 天` : `${days} days left`
-  const items: Array<{ icon: string, text: string }> = [
-    { icon: 'tabler:calendar-stats', text: daysText },
-  ]
+    remainDaysText = lang === 'zh-CN' ? `剩${expireDays}天` : `${expireDays}d left`
+
   if (showPrice.value) {
-    const remainingValue = getRemainingValue(node.price, node.billing_cycle, node.expired_at)
-    items.push({ icon: 'tabler:coins', text: formatCurrencyValue(remainingValue, node.currency) })
+    const priceLabel = (node.price === 0 || node.price === -1)
+      ? (lang === 'zh-CN' ? '免费' : 'Free')
+      : formatCurrencyValue(node.price, node.currency)
+    const priceCycleText = `${priceLabel}/${getBillingCycleText(node.billing_cycle, lang)}`
+    const remainValue = formatCurrencyValue(
+      getRemainingValue(node.price, node.billing_cycle, node.expired_at),
+      node.currency,
+    )
+    return [priceCycleText, onlineText, `${remainDaysText}/${remainValue}`]
   }
-  return items
+
+  return [onlineText, remainDaysText]
 })
 
 const customTags = computed(() => parseTags(props.node.tags).map(t => t.text))
@@ -182,7 +176,7 @@ function hasRegion(region: string | null | undefined): boolean {
 
     <template #default>
       <div class="flex flex-col gap-3 relative">
-        <!-- 价格标签行（在线天数 + 价格） -->
+        <!-- 顶部标签行 -->
         <div v-if="onlineInfoTags.length" class="flex gap-1.5 flex-wrap -mt-1">
           <span
             v-for="(tag, i) in onlineInfoTags" :key="i"
@@ -251,8 +245,8 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
         </div>
 
-        <!-- 三列：网速 / 总流量 / 剩余天数+价格或负载 -->
-        <div class="grid grid-cols-3 gap-1.5">
+        <!-- 两列：网速 / 总流量 -->
+        <div class="grid grid-cols-2 gap-1.5">
           <!-- 实时网速 -->
           <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
             <div class="text-[11px] text-green-600 flex items-center gap-1">
@@ -275,27 +269,6 @@ function hasRegion(region: string | null | undefined): boolean {
               <Icon icon="tabler:download" width="11" height="11" />
               <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
             </div>
-          </div>
-
-          <!-- 第三列：有价格显示剩余天数+价格，否则显示负载 -->
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
-            <template v-if="remainingInfoTags.length">
-              <div
-                v-for="(item, i) in remainingInfoTags" :key="i"
-                class="text-[11px] text-muted-foreground flex items-center gap-1"
-              >
-                <Icon :icon="item.icon" width="11" height="11" class="shrink-0" />
-                <span class="truncate min-w-0">{{ item.text }}</span>
-              </div>
-            </template>
-            <template v-else>
-              <div class="text-[11px] text-muted-foreground truncate">
-                {{ props.node.load.toFixed(2) }}
-              </div>
-              <div class="text-[11px] text-muted-foreground truncate">
-                {{ props.node.load5.toFixed(2) }} / {{ props.node.load15.toFixed(2) }}
-              </div>
-            </template>
           </div>
         </div>
 
