@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { onMounted, ref } from 'vue'
+import { useWindowSize } from '@vueuse/core'
+import { computed, onMounted, ref } from 'vue'
 
 interface VisitorData {
   ip: string
@@ -11,6 +12,8 @@ interface VisitorData {
 const show = ref(false)
 const dismissed = ref(false)
 const visitor = ref<VisitorData | null>(null)
+const { width } = useWindowSize()
+const showOrg = computed(() => width.value >= 640)
 
 onMounted(async () => {
   try {
@@ -49,8 +52,10 @@ onMounted(async () => {
       <span class="font-semibold text-foreground">{{ visitor.ip }}</span>
       <span class="text-muted-foreground/40">|</span>
       <span class="text-muted-foreground">{{ visitor.country }}</span>
-      <span class="text-muted-foreground/40">|</span>
-      <span class="text-muted-foreground truncate max-w-[140px] md:max-w-[220px]">{{ visitor.org }}</span>
+      <template v-if="showOrg">
+        <span class="text-muted-foreground/40">|</span>
+        <span class="text-muted-foreground truncate max-w-[220px]">{{ visitor.org }}</span>
+      </template>
     </div>
   </Transition>
 </template>
