@@ -11,6 +11,7 @@ export interface NodePingHistoryPoint {
 
 export interface NodePingStatsState {
   avgLatency: number
+  maxLatency: number
   avgLoss: number
   avgVolatility: number
   history: NodePingHistoryPoint[]
@@ -43,7 +44,7 @@ interface SharedPingRecordsEntry {
 }
 
 const HISTORY_BUCKET_COUNT = 20
-const CACHE_VERSION = 5
+const CACHE_VERSION = 6
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
@@ -57,6 +58,7 @@ interface TaskRecordSummary {
 function createEmptyStats(): NodePingStatsState {
   return {
     avgLatency: 0,
+    maxLatency: 0,
     avgLoss: 0,
     avgVolatility: 0,
     history: [],
@@ -122,6 +124,7 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
 
   const state = value as Record<string, unknown>
   return typeof state.avgLatency === 'number'
+    && typeof state.maxLatency === 'number'
     && typeof state.avgLoss === 'number'
     && typeof state.avgVolatility === 'number'
     && typeof state.hasData === 'boolean'
@@ -303,7 +306,7 @@ function buildPingHistory(records: PingRecord[]): NodePingHistoryPoint[] {
     const validLatencyRecords = bucketRecords.filter(record => record.value >= 0)
     const lostCount = bucketRecords.length - validLatencyRecords.length
     const latency = validLatencyRecords.length
-      ? average(validLatencyRecords.map(record => record.value))
+      ? Math.max(...validLatencyRecords.map(record => record.value))
       : null
     const loss = bucketRecords.length
       ? lostCount / bucketRecords.length * 100
@@ -376,6 +379,10 @@ function buildStats(records: PingRecord[]): NodePingStatsState {
     }
   }
 
+  const allValidLatencies = filteredRecords
+    .filter(record => record.value >= 0)
+    .map(record => record.value)
+
   const historyLatencyValues = history
     .map(point => point.latency)
     .filter(isFiniteNumber)
@@ -384,12 +391,18 @@ function buildStats(records: PingRecord[]): NodePingStatsState {
     .filter(isFiniteNumber)
 
   const avgLatency = latencyValues.length ? average(latencyValues) : average(historyLatencyValues)
+  const maxLatency = allValidLatencies.length
+    ? Math.max(...allValidLatencies)
+    : historyLatencyValues.length
+      ? Math.max(...historyLatencyValues)
+      : 0
   const avgLoss = taskLossValues.length ? average(taskLossValues) : average(historyLossValues)
   const avgVolatility = average(volatilityValues)
   const hasData = history.length > 0 || latencyValues.length > 0 || taskLossValues.length > 0
 
   return {
     avgLatency,
+    maxLatency,
     avgLoss,
     avgVolatility,
     history,
@@ -523,6 +536,7 @@ export function useNodePingStats(
     error,
     history: computed(() => stats.value.history),
     avgLatency: computed(() => stats.value.avgLatency),
+    maxLatency: computed(() => stats.value.maxLatency),
     avgLoss: computed(() => stats.value.avgLoss),
     avgVolatility: computed(() => stats.value.avgVolatility),
     hasData: computed(() => stats.value.hasData),

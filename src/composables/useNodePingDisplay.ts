@@ -118,7 +118,7 @@ export function useNodePingDisplay(
 
   const latencyDisplay = computed(() => {
     if (pingStats.hasData.value)
-      return `${Math.round(pingStats.avgLatency.value)} ms`
+      return `${Math.round(pingStats.maxLatency.value)} ms`
     if (pingStats.loading.value)
       return options.loadingDisplayText ?? '加载中'
     return options.emptyDisplayText ?? '-'
@@ -138,7 +138,7 @@ export function useNodePingDisplay(
         return options.loadingPanelTooltipText?.latency ?? ''
       return options.emptyPanelTooltipText?.latency ?? ''
     }
-    return `平均延迟 ${Math.round(pingStats.avgLatency.value)} ms`
+    return `最高延迟 ${Math.round(pingStats.maxLatency.value)} ms`
   })
 
   const lossPanelTooltip = computed(() => {
