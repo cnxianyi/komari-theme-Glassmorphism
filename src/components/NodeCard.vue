@@ -8,7 +8,7 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
-import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
+import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatCurrencyValue, getBillingCycleText, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
@@ -19,7 +19,6 @@ const appStore = useAppStore()
 
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
-const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'hour')
 const offlineTime = computed(() => formatDateTime(props.node.time))
 
 const cpuStatus = computed(() => getStatus(props.node.cpu ?? 0))
@@ -27,6 +26,8 @@ const memPercentage = computed(() => (props.node.ram ?? 0) / (props.node.mem_tot
 const memStatus = computed(() => getStatus(memPercentage.value))
 const diskPercentage = computed(() => (props.node.disk ?? 0) / (props.node.disk_total || 1) * 100)
 const diskStatus = computed(() => getStatus(diskPercentage.value))
+const swapPercentage = computed(() => (props.node.swap ?? 0) / (props.node.swap_total || 1) * 100)
+const swapStatus = computed(() => getStatus(swapPercentage.value))
 
 const {
   latencyRenderBars,
@@ -49,12 +50,22 @@ const trafficUsedPercentage = computed(() => {
   const { net_total_up = 0, net_total_down = 0, traffic_limit_type } = props.node
   let used = 0
   switch (traffic_limit_type) {
-    case 'up': used = net_total_up; break
-    case 'down': used = net_total_down; break
-    case 'min': used = Math.min(net_total_up, net_total_down); break
-    case 'max': used = Math.max(net_total_up, net_total_down); break
+    case 'up':
+      used = net_total_up
+      break
+    case 'down':
+      used = net_total_down
+      break
+    case 'min':
+      used = Math.min(net_total_up, net_total_down)
+      break
+    case 'max':
+      used = Math.max(net_total_up, net_total_down)
+      break
     case 'sum':
-    default: used = net_total_up + net_total_down; break
+    default:
+      used = net_total_up + net_total_down
+      break
   }
   return Math.min((used / props.node.traffic_limit) * 100, 100)
 })
@@ -71,30 +82,27 @@ const trafficUsed = computed(() => {
   }
 })
 
-// 流量状态颜色
-const trafficStatus = computed(() => {
-  if (!showTrafficProgress(props.node))
-    return 'success'
-  if (trafficUsedPercentage.value >= 95)
-    return 'error'
-  if (trafficUsedPercentage.value >= 80)
-    return 'warning'
-  if (trafficUsedPercentage.value >= 60)
-    return 'info'
-  return 'success'
-})
+function getTrafficFillColor(percentage: number): string {
+  if (percentage < 50)
+    return 'rgb(59 130 246)'
+  if (percentage <= 80)
+    return 'rgb(249 115 22)'
+  return 'rgb(239 68 68)'
+}
 
-const trafficPercentageClass = computed(() => {
-  if (!showTrafficProgress(props.node))
-    return 'text-muted-foreground'
-  if (trafficUsedPercentage.value >= 95)
-    return 'text-red-500'
-  if (trafficUsedPercentage.value >= 80)
-    return 'text-orange-500'
-  if (trafficUsedPercentage.value >= 60)
-    return 'text-yellow-500'
-  return 'text-green-600'
-})
+const trafficFillStyle = computed(() => ({
+  '--traffic-fill-level': showTrafficProgress(props.node) ? `${trafficUsedPercentage.value}%` : '0%',
+  '--traffic-fill-color': getTrafficFillColor(trafficUsedPercentage.value),
+}))
+const trafficQuotaLabel = computed(() => showTrafficProgress(props.node)
+  ? `${trafficUsedPercentage.value.toFixed(1)}%`
+  : '∞')
+const trafficLimitLabel = computed(() => showTrafficProgress(props.node)
+  ? formatBytes(props.node.traffic_limit)
+  : '∞')
+const trafficPanelTooltip = computed(() => showTrafficProgress(props.node)
+  ? `套餐流量 ${formatBytes(trafficUsed.value)} / ${formatBytes(props.node.traffic_limit)}`
+  : `套餐流量 ${formatBytes(trafficUsed.value)} / ∞`)
 
 // 是否显示金额：未登录且开启「未登录隐藏价格」时不显示价格 / 剩余价值，
 // 但在线天数、剩余天数等非金额信息仍然展示
@@ -226,23 +234,15 @@ function hasRegion(region: string | null | undefined): boolean {
             </div>
           </div>
 
-          <!-- 流量（分级颜色） -->
+          <!-- 交换 -->
           <div class="flex flex-col gap-1">
             <div class="flex justify-between text-xs">
-              <span class="text-muted-foreground">流量</span>
-              <span class="tabular-nums font-medium" :class="trafficPercentageClass">
-                {{ showTrafficProgress(props.node) ? `${trafficUsedPercentage.toFixed(1)}%` : '∞' }}
-              </span>
+              <span class="text-muted-foreground">交换</span>
+              <span class="tabular-nums font-medium">{{ swapPercentage.toFixed(1) }}%</span>
             </div>
-            <ProgressThin :percentage="trafficUsedPercentage" :status="trafficStatus" :height="4" />
-            <div class="text-[11px] truncate" :class="trafficUsedPercentage >= 95 ? 'text-red-500' : 'text-muted-foreground'">
-              {{ formatBytes(trafficUsed) }}
-              <template v-if="showTrafficProgress(props.node)">
-                / {{ formatBytes(props.node.traffic_limit) }}
-              </template>
-              <template v-else>
-                / ∞
-              </template>
+            <ProgressThin :percentage="swapPercentage" :status="swapStatus" :height="4" />
+            <div class="text-[11px] text-muted-foreground truncate">
+              {{ formatBytes(props.node.swap ?? 0) }} / {{ formatBytes(props.node.swap_total ?? 0) }}
             </div>
           </div>
         </div>
@@ -261,14 +261,24 @@ function hasRegion(region: string | null | undefined): boolean {
             </div>
           </div>
 
-          <!-- 总流量 -->
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
-            <div class="text-[11px] text-muted-foreground flex items-center gap-1">
-              <Icon icon="tabler:upload" width="11" height="11" />
+          <!-- 总流量 + 套餐使用渐变 -->
+          <div
+            class="traffic-total-panel relative isolate flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden"
+            :style="trafficFillStyle"
+            :title="trafficPanelTooltip"
+          >
+            <div
+              class="traffic-quota-label pointer-events-none absolute inset-y-0 right-2 z-1 flex flex-col items-end justify-center gap-0.5 text-[11px] font-medium tabular-nums opacity-60"
+            >
+              <span>{{ trafficQuotaLabel }}</span>
+              <span>{{ trafficLimitLabel }}</span>
+            </div>
+            <div class="relative z-2 text-[11px] text-muted-foreground flex items-center gap-1 min-w-0">
+              <Icon icon="tabler:upload" width="11" height="11" class="shrink-0" />
               <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
             </div>
-            <div class="text-[11px] text-muted-foreground flex items-center gap-1">
-              <Icon icon="tabler:download" width="11" height="11" />
+            <div class="relative z-2 text-[11px] text-muted-foreground flex items-center gap-1 min-w-0">
+              <Icon icon="tabler:download" width="11" height="11" class="shrink-0" />
               <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
             </div>
           </div>
@@ -359,5 +369,26 @@ function hasRegion(region: string | null | undefined): boolean {
 .node-card {
   position: relative;
   overflow: hidden;
+}
+
+.traffic-quota-label {
+  color: var(--traffic-fill-color);
+  transition: color 500ms ease;
+}
+
+.traffic-total-panel {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--traffic-fill-color) 3%, transparent) 0%,
+    color-mix(in srgb, var(--traffic-fill-color) 22%, transparent) var(--traffic-fill-level),
+    transparent var(--traffic-fill-level),
+    transparent 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .traffic-quota-label {
+    transition: none;
+  }
 }
 </style>
